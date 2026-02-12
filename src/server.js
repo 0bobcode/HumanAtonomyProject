@@ -1,36 +1,15 @@
-import "dotenv/config";
 import express from "express";
-import path from "path";
-import { fileURLToPath } from "url";
-import OpenAI from "openai";
 import cors from "cors";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = 3001;
 
-// Vite default origin
-app.use(cors({
-    origin: "http://localhost:5174",
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-}));
-
-// Express 5: don't use "*" here
-// app.options("/*", cors());
-
+app.use(cors({ origin: true }));
 app.use(express.json());
-
-// If you're only doing API in dev, you can skip serving build entirely.
-// (Serving build is for production builds.)
-console.log("OPENAI_API_KEY present?", !!process.env.OPENAI_API_KEY);
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 app.post("/api/ask-organ", async (req, res) => {
     const { organ, question } = req.body;
+
     if (!organ || !question) {
         return res.status(400).json({ error: "Missing organ or question" });
     }
@@ -38,39 +17,53 @@ app.post("/api/ask-organ", async (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
 
     try {
-        const stream = await openai.chat.completions.create({
-            model: "gpt-4o",
-            max_tokens: 400,
-            stream: true,
-            messages: [
-                {
-                    role: "system",
-                    content:
-                        "You are an expert anatomist and science educator inside an interactive human anatomy app. Answer questions in a friendly, engaging, concise way (2-4 sentences max). Use plain language suitable for curious learners of all ages. Do not use markdown.",
-                },
-                {
-                    role: "user",
-                    content: `The user is currently viewing the ${organ}. Their question: ${question}`,
-                },
-            ],
+        const response = await fetch("http://localhost:11434/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                model: "llama3",
+                stream: true,
+                prompt: `You are an expert anatomist inside an anatomy app. Answer clearly and concisely in 2-4 sentences.
+
+The user is viewing the ${organ}.
+Question: ${question}`,
+            }),
         });
 
-        for await (const chunk of stream) {
-            const text = chunk.choices[0]?.delta?.content || "";
-            if (text) res.write(`data: ${JSON.stringify({ text })}\n\n`);
-        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
 
-        res.write("data: [DONE]\n\n");
-        res.end();
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const lines = decoder.decode(value).split("\n");
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                const data = JSON.parse(line);
+
+                if (data.response) {
+                    res.write(`data: ${JSON.stringify({ text: data.response })}\n\n`);
+                }
+
+                if (data.done) {
+                    res.write("data: [DONE]\n\n");
+                    res.end();
+                    return;
+                }
+            }
+        }
     } catch (err) {
         console.error(err);
-        res.write(`data: ${JSON.stringify({ error: "AI error: " + err.message })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
         res.end();
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`API running at http://localhost:${PORT}`);
+    console.log(`✅ FREE AI running at http://localhost:${PORT}`);
 });

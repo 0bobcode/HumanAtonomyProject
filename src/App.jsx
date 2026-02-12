@@ -229,45 +229,91 @@ function AIChat({ organName, organColor }) {
   const sendQuestion = async () => {
     const q = input.trim();
     if (!q || loading) return;
+
     setInput("");
-    setMessages(prev => [...prev, { role: "user", text: q }, { role: "ai", text: "", streaming: true }]);
+    setMessages(prev => [
+      ...prev,
+      { role: "user", text: q },
+      { role: "ai", text: "", streaming: true }
+    ]);
+
     setLoading(true);
+
     try {
-    const res = await fetch("http://localhost:3001/api/ask-organ", {
+      const res = await fetch("http://localhost:3001/api/ask-organ", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ organ: organName, question: q }),
       });
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
+
+      let buffer = "";
       let aiText = "";
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        for (const line of decoder.decode(value).split("\n")) {
-          if (line.startsWith("data: ")) {
-            const payload = line.slice(6);
-            if (payload === "[DONE]") break;
-            try {
-              const { text } = JSON.parse(payload);
-              if (text) {
-                aiText += text;
-                setMessages(prev => {
-                  const u = [...prev];
-                  u[u.length - 1] = { role: "ai", text: aiText, streaming: true };
-                  return u;
-                });
-              }
-            } catch { }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop(); // keep incomplete line
+
+        for (let line of lines) {
+          line = line.trim();
+          if (!line.startsWith("data: ")) continue;
+
+          const payload = line.replace("data: ", "");
+
+          if (payload === "[DONE]") {
+            setLoading(false);
+            return;
           }
+
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.text) {
+              aiText += parsed.text;
+
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  role: "ai",
+                  text: aiText,
+                  streaming: true
+                };
+                return updated;
+              });
+            }
+          } catch { }
         }
       }
-      setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: "ai", text: aiText }; return u; });
-    } catch {
-      setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: "ai", text: "Sorry, couldn't reach the AI." }; return u; });
+
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: "ai",
+          text: aiText
+        };
+        return updated;
+      });
+
+    } catch (err) {
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: "ai",
+          text: "Error connecting to local AI."
+        };
+        return updated;
+      });
     }
+
     setLoading(false);
   };
+
 
   return (
     <div style={{ background: "#060e1a", borderRadius: "12px", border: `1px solid ${organColor}44`, display: "flex", flexDirection: "column", height: "220px" }}>
