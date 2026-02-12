@@ -240,7 +240,7 @@ function AIChat({ organName, organColor }) {
     setLoading(true);
 
     try {
-      const res = await fetch("http://localhost:3001/api/ask-organ", {
+      const res = await fetch("/api/ask-organ", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ organ: organName, question: q }),

@@ -1,20 +1,17 @@
-# Use Node LTS
-FROM node:20-alpine
-
-# Set working directory
+# Build
+FROM node:20-alpine AS build
 WORKDIR /app
-
-# Copy package files
 COPY package*.json ./
-
-# Install dependencies
-RUN npm install
-
-# Copy rest of the app
+RUN npm ci
 COPY . .
+RUN npm run build
 
-# Expose backend port
-EXPOSE 3001
+# Serve
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
 
-# Start server
-CMD ["node", "server.js"]
+# Simple reverse proxy for /api -> backend
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
